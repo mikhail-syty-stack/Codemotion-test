@@ -1,0 +1,101 @@
+# Docker Networks
+networks:
+  codemotion_network:
+    driver: bridge
+
+# Docker Volumes
+volumes:
+  postgres_data:    # Persistent database storage 
+
+services:
+  # Laravel Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: codemotion_backend
+    restart: unless-stopped
+    volumes:
+      - ./backend:/var/www/html
+      - /var/www/html/vendor
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - codemotion_network
+    environment:
+      - DB_HOST=db
+      - DB_DATABASE=codemotion
+      - DB_USERNAME=codemotion
+      - DB_PASSWORD=secret
+      - XDEBUG_MODE=debug
+      - XDEBUG_CONFIG="client_host=host.docker.internal"
+      - PHP_IDE_CONFIG="serverName=Docker"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm -t"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # React Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: codemotion_frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "3000:3000"
+    networks:
+      - codemotion_network
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - nginx
+
+  # Nginx Web Server Service
+  nginx:
+    image: nginx:alpine
+    container_name: codemotion_nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./backend:/var/www/html
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - codemotion_network
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # PostgreSQL Database Service
+  db:
+    image: postgres:17
+    container_name: codemotion_db
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=codemotion
+      - POSTGRES_USER=codemotion
+      - POSTGRES_PASSWORD=secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - codemotion_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codemotion"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
